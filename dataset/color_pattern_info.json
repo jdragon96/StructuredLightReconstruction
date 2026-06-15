@@ -1,0 +1,86 @@
+{
+  "mode": "hamming",
+  "k": 3,
+  "n": 4,
+  "decode_window": 4,
+  "logical_stripes": 27,
+  "projected_stripes": 27,
+  "sequence": [
+    7,
+    6,
+    7,
+    6,
+    4,
+    5,
+    4,
+    0,
+    1,
+    3,
+    1,
+    0,
+    2,
+    6,
+    7,
+    3,
+    1,
+    0,
+    4,
+    0,
+    2,
+    0,
+    2,
+    6,
+    4,
+    0,
+    4
+  ],
+  "palette": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      255,
+      0,
+      0
+    ],
+    [
+      0,
+      255,
+      0
+    ],
+    [
+      255,
+      255,
+      0
+    ],
+    [
+      0,
+      0,
+      255
+    ],
+    [
+      255,
+      0,
+      255
+    ],
+    [
+      0,
+      255,
+      255
+    ],
+    [
+      255,
+      255,
+      255
+    ]
+  ],
+  "adjacency": "Hamming distance 1 (linear neighbors)",
+  "self_equalizing": false,
+  "pair_layout": null,
+  "image_size": [
+    1280,
+    720
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "frequency": 64.0,
+  "channel_order": [
+    "R:I0",
+    "G:I1",
+    "B:I2"
+  ],
+  "phase_shifts_radians": [
+    0.0,
+    -2.0943951023931953,
+    -4.1887902047863905
+  ],
+  "wrapped_phase_formula": "atan2(sqrt(3) * (G - B), 2 * R - G - B)",
+  "response_model": "camera_rgb = response_matrix @ projector_rgb",
+  "response_matrix": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "projector_precompensation": false,
+  "inverse_matrix": null,
+  "image_size": [
+    1280,
+    720
+  ]
+}

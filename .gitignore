@@ -1,0 +1,9 @@
+**/.cache
+**/.vscode
+**/build
+**/python
+**/color_coded_debug
+
+.DS_STORE
+color_coded_reconstruction.ply
+multi_freq_reconstruction.ply
