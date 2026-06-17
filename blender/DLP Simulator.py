@@ -431,7 +431,17 @@ def _configure_scene(proj_pos, main_pos, target, props) -> str:
 
 # ─── Camera Calibration export ────────────────────────────────────────────────
 
-def _build_calibration_dict(props, cam_name: str = MAIN_CAM) -> dict:
+def _opencv_cam2world_matrix(cam_obj: bpy.types.Object):
+    """Blender camera pose -> OpenCV camera-to-world rotation."""
+    import mathutils
+
+    # Blender(−Z forward, Y up) → OpenCV(+Z forward, Y down): 로컬 Y·Z 반전
+    flip = mathutils.Matrix.Diagonal(mathutils.Vector((1.0, -1.0, -1.0)))
+    return cam_obj.matrix_world.to_3x3() @ flip
+
+
+def _build_calibration_dict(props, cam_name: str = MAIN_CAM,
+                            origin_cam_name: str = MAIN_CAM) -> dict:
     """
     지정한 카메라(기본 DLP_MainCamera)의 intrinsic/extrinsic을 PhaseShift.py의
     CameraInformation(image_size, intrinsic, distortion, rotate, translate)
@@ -442,16 +452,18 @@ def _build_calibration_dict(props, cam_name: str = MAIN_CAM) -> dict:
 
     - intrinsic: 핀홀 모델. fx == fy == (W/2) / tan(fov/2)  (정사각 픽셀, 중앙 주점)
     - distortion: 렌더 결과는 왜곡이 없으므로 0
-    - rotate/translate: OpenCV 카메라 좌표계(+Z forward, Y down) 기준 world→camera
-      회전(Rodrigues)과 카메라 world 위치.
-      Blender 카메라(−Z forward, Y up) → OpenCV 변환은 로컬 X축 기준 180° 회전
-      (Y, Z 축 반전)으로 처리.
+    - rotate/translate: origin_cam_name의 OpenCV 카메라 좌표계를 기준 world로 삼는다.
+      기본값은 DLP_MainCamera이므로 camera_calibration.json은 원점/무회전이고,
+      projector_calibration.json은 메인 카메라 기준 상대 pose가 된다.
+      rotate는 기준 world→해당 카메라의 Rodrigues, translate는 해당 광학중심의
+      기준 world 좌표다.
     """
-    import mathutils
-
     cam_obj = bpy.data.objects.get(cam_name)
     if cam_obj is None:
         raise RuntimeError(f"{cam_name} 없음. 'Setup from View' 먼저 실행.")
+    origin_obj = bpy.data.objects.get(origin_cam_name)
+    if origin_obj is None:
+        raise RuntimeError(f"{origin_cam_name} 없음. 'Setup from View' 먼저 실행.")
 
     W, H = props.width, props.height
     f    = (W / 2.0) / math.tan(math.radians(props.fov_deg) / 2.0)
@@ -461,17 +473,19 @@ def _build_calibration_dict(props, cam_name: str = MAIN_CAM) -> dict:
                  [0.0, f,   cy],
                  [0.0, 0.0, 1.0]]
 
-    # Blender(−Z forward, Y up) → OpenCV(+Z forward, Y down): 로컬 Y·Z 반전
-    flip           = mathutils.Matrix.Diagonal(mathutils.Vector((1.0, -1.0, -1.0)))
-    R_cam2world    = cam_obj.matrix_world.to_3x3() @ flip
-    R_world2cam    = R_cam2world.transposed()
+    R_origin_cam2world = _opencv_cam2world_matrix(origin_obj)
+    R_origin_world2cam = R_origin_cam2world.transposed()
+    R_cam2origin       = R_origin_world2cam @ _opencv_cam2world_matrix(cam_obj)
+    R_origin2cam       = R_cam2origin.transposed()
 
-    quat  = R_world2cam.to_quaternion()
+    quat  = R_origin2cam.to_quaternion()
     axis  = quat.axis
     angle = quat.angle
     rvec  = [axis.x * angle, axis.y * angle, axis.z * angle]
 
-    loc = cam_obj.matrix_world.translation
+    loc = R_origin_world2cam @ (
+        cam_obj.matrix_world.translation - origin_obj.matrix_world.translation
+    )
 
     return {
         "image_size": [W, H],
@@ -1265,11 +1279,11 @@ class DLP_OT_render_combined(Operator):
         import json
         out_base.mkdir(parents=True, exist_ok=True)
 
-        cam_calib = _build_calibration_dict(props, MAIN_CAM)
+        cam_calib = _build_calibration_dict(props, MAIN_CAM, MAIN_CAM)
         with open(out_base / "camera_calibration.json", 'w', encoding='utf-8') as f:
             json.dump(cam_calib, f, indent=2)
 
-        proj_calib = _build_calibration_dict(props, PROJ_CAM)
+        proj_calib = _build_calibration_dict(props, PROJ_CAM, MAIN_CAM)
         with open(out_base / "projector_calibration.json", 'w', encoding='utf-8') as f:
             json.dump(proj_calib, f, indent=2)
 
