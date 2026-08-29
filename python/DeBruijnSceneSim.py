@@ -40,6 +40,18 @@ BG, FG, DIM = "#1a1a1a", "#e8e8e8", "#8a8a8a"
 PALETTE = np.array([[0, 1, 0], [0, 1, 1], [0, 0, 1]], float)   # Green, Cyan, Blue
 PAL_NAMES = ["Green", "Cyan", "Blue"]
 
+# 구강 내 대표 표면. 반사율 근사값 (0~1).
+# 흥미롭게도 구강 표면 대부분은 G:B 가 균형에 가깝다 — 색도 붕괴보다
+# 밝기(혈액·그림자)와 표면하 산란이 실제 위험이다.
+DENTAL = [
+    ("Enamel", (0.85, 0.85, 0.82)),      # 에나멜 (반투명)
+    ("Dentin", (0.82, 0.72, 0.55)),      # 상아질 (노란기)
+    ("Gingiva", (0.75, 0.42, 0.42)),     # 치은
+    ("Blood", (0.45, 0.10, 0.10)),       # 혈액
+    ("Metal", (0.55, 0.55, 0.58)),       # 금속 수복물
+    ("Composite", (0.80, 0.76, 0.70)),   # 컴포지트
+]
+
 # X-Rite ColorChecker sRGB 대표값
 MACBETH = [
     ("Dark skin", (115, 82, 68)), ("Light skin", (194, 150, 130)),
@@ -77,11 +89,13 @@ def make_scene(kind, H, W, rng):
     yy, xx = np.mgrid[0:H, 0:W]
     patches = None
 
-    if kind == "macbeth":
+    if kind in ("macbeth", "dental"):
         albedo = np.zeros((H, W, 3))
-        cols, rowsn = 6, 4
+        table = MACBETH if kind == "macbeth" else [(n, tuple(int(v * 255) for v in c))
+                                                   for n, c in DENTAL]
+        cols, rowsn = (6, 4) if kind == "macbeth" else (3, 2)
         patches = []
-        for i, (name, rgb) in enumerate(MACBETH):
+        for i, (name, rgb) in enumerate(table):
             r, c = divmod(i, cols)
             y0, y1 = int(r * H / rowsn), int((r + 1) * H / rowsn)
             x0, x1 = int(c * W / cols), int((c + 1) * W / cols)
@@ -116,10 +130,34 @@ def stripe_truth(H, W, n_stripes, bump):
     return s
 
 
+def subsurface_blur(pattern, sigma_px):
+    """표면하 산란 — 채널별 가우시안 확산.
+
+    장파장일수록 조직에 깊이 침투해 옆으로 더 퍼진다(에나멜에서 Green > Blue).
+    중요한 성질: white 프레임은 평탄한 장이라 blur 를 먹여도 그대로다.
+    따라서 **white 정규화로 이 왜곡은 전혀 제거되지 않는다.**
+    """
+    out = np.empty_like(pattern)
+    for ch in range(3):
+        s = sigma_px[ch]
+        if s <= 0.05:
+            out[..., ch] = pattern[..., ch]
+            continue
+        r = max(1, int(np.ceil(3 * s)))
+        x = np.arange(-r, r + 1)
+        k = np.exp(-0.5 * (x / s) ** 2)
+        k /= k.sum()
+        pad = np.pad(pattern[..., ch], ((0, 0), (r, r)), mode="edge")
+        out[..., ch] = np.apply_along_axis(lambda v: np.convolve(v, k, "valid"), 1, pad)
+    return out
+
+
 # ---------------------------------------------------------------- 촬영
-def capture(albedo, shading, projected, noise, ambient, crosstalk, rng):
+def capture(albedo, shading, projected, noise, ambient, crosstalk, rng, sigma_px=None):
     M = np.eye(3) * (1 - 2 * crosstalk) + crosstalk
     M = M / M.sum(1, keepdims=True)                       # 에너지 보존
+    if sigma_px is not None and np.ndim(projected) == 3:
+        projected = subsurface_blur(projected, sigma_px)
     src = shading[..., None] * albedo * projected
     v = np.einsum("...i,ji->...j", src, M) + ambient   # matmul 의 허위 경고 회피
     v = v + rng.normal(0, noise, v.shape)
@@ -221,9 +259,17 @@ def evaluate(args):
     s_true = stripe_truth(H, W, L, bump)
     idx_true = np.clip(s_true.astype(int), 0, L - 1)
 
+    # 산란 σ 를 픽셀 단위로. um_per_px = 피치 / (스트라이프당 카메라 픽셀 수)
+    um_per_px = args.pitch_um / (W / L)
+    if args.sss_um > 0:
+        g = args.sss_um / um_per_px
+        sigma = np.array([g * args.sss_gb_ratio, g, g / args.sss_gb_ratio])  # R, G, B
+    else:
+        sigma = None
+
     projected = PALETTE[code[idx_true]]
-    obs = capture(albedo, shading, projected, args.noise, args.ambient, args.crosstalk, rng)
-    white = capture(albedo, shading, np.ones(3), args.noise, args.ambient, args.crosstalk, rng)
+    obs = capture(albedo, shading, projected, args.noise, args.ambient, args.crosstalk, rng, sigma)
+    white = capture(albedo, shading, np.ones(3), args.noise, args.ambient, args.crosstalk, rng, sigma)
 
     # 스트라이프 중심 샘플
     c_obs = sample_stripe_centers(obs, s_true)
@@ -366,7 +412,13 @@ def figure_margin(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scene", choices=["texture", "macbeth"], default="texture")
+    ap.add_argument("--scene", choices=["texture", "macbeth", "dental"], default="texture")
+    ap.add_argument("--pitch-um", type=float, default=200.0,
+                    help="카메라 평면에서의 스트라이프 피치")
+    ap.add_argument("--sss-um", type=float, default=0.0,
+                    help="표면하 산란 확산 길이 (Green 기준, 0 이면 없음)")
+    ap.add_argument("--sss-gb-ratio", type=float, default=1.4,
+                    help="Green/Blue 확산 길이 비 — 장파장이 더 퍼진다")
     ap.add_argument("--width", type=int, default=720)
     ap.add_argument("--height", type=int, default=240)
     ap.add_argument("--noise", type=float, default=0.03)
@@ -401,8 +453,10 @@ def main():
     R = evaluate(args)
     tag = f"{args.scene}_{'white' if args.white else 'nowhite'}"
 
+    sss = (f" · 산란 {args.sss_um:.0f}µm (피치 {args.pitch_um:.0f}µm 의 "
+           f"{args.sss_um / args.pitch_um:.2f}배)" if args.sss_um > 0 else " · 산란 없음")
     print(f"씬 '{args.scene}' · white {'사용' if args.white else '미사용'} · "
-          f"노이즈 σ={args.noise} · {args.height}x{args.width} · 72 스트라이프/행\n")
+          f"노이즈 σ={args.noise}{sss} · {args.height}x{args.width} · 72 스트라이프/행\n")
     print(f"   {'방법':<13}{'라벨':>8}{'LUT히트':>9}{'위치정확':>9}{'조용한오복원':>13}"
           f"{'문맥필터후 정확':>16}{'오복원':>9}")
     for name, r in R["results"].items():
