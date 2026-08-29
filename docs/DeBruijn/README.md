@@ -127,7 +127,7 @@ k=3, L=72 에 대입하면:
 | 4 | 69 | 81 | **가능** |
 | 5 | 68 | 243 | 가능 (과잉) |
 
-**n = 4가 최소값**이다. n을 키우면 여유는 생기지만 디코딩에 필요한 연속 관측
+**n = 4가 최소값**이다 (`DeBruijnPattern::minimumWindow()` 가 같은 계산을 한다). n을 키우면 여유는 생기지만 디코딩에 필요한 연속 관측
 구간이 길어져서, 물체 경계나 가림(occlusion) 근처에서 복원이 끊긴다.
 그래서 조건을 만족하는 **최소 n**을 쓴다.
 
@@ -580,8 +580,19 @@ B'(3,6) 주기 96
 
 ## 8. 재현
 
+C++ 구현(`src/StructuredLight/DeBruijnPattern.h`)과 Python 구현은 **바이트 단위로
+동일한 SVG/PNG/JSON** 을 만든다. 제작용 산출물은 어느 쪽으로 뽑아도 된다.
+
 ```bash
-# 기본값이 곧 제작 스펙 (k=3, n=4, offset 6, 72 스트라이프)
+# C++ — 빌드 후
+cmake --build build --target DeBruijnPatternTest
+./build/DeBruijnPatternTest dataset/debruijn
+./build/DeBruijnPatternTest out --n 6 --no-repeat --offset 50
+./build/DeBruijnPatternTest out --pitch-mm 0.25 --height-mm 12
+```
+
+```bash
+# Python — 기본값이 곧 제작 스펙 (k=3, n=4, offset 6, 72 스트라이프)
 python3 python/DeBruijnPattern.py
 
 # 글라스 실제 치수로 다시 뽑기
@@ -610,7 +621,9 @@ python3 python/DeBruijnSceneSim.py --doc
 | `dataset/debruijn/debruijn_k3n4_72.svg` | 마스크 제작용 벡터 (36 × 24 mm, 피치 0.5 mm) |
 | `dataset/debruijn/debruijn_k3n4_72.png` | 1280 × 720, 스트라이프 17 px, 좌우 여백 28 px |
 | `dataset/debruijn/debruijn_pattern_info.json` | 시퀀스 · 팔레트 · 검증 리포트 |
-| `python/DeBruijnPattern.py` | 생성기 (k / n / length / offset / 피치 파라미터) |
+| `src/StructuredLight/DeBruijnPattern.h` / `.cpp` | C++ 생성기 — 수열·검증·SVG/PNG/JSON, `ColorCodeInfo` 변환 |
+| `example/DeBruijnPatternTest.cpp` | C++ 생성기 CLI |
+| `python/DeBruijnPattern.py` | Python 생성기 (동일 출력) |
 | `python/DeBruijnFigures.py` | 이 문서의 그림 1~4, 7 생성기 |
 | `python/ColorClassifySim.py` | 5절 분류기 시뮬레이션 · 그림 5~6 생성기 |
 | `python/DeBruijnSceneSim.py` | 6.3~6.4절 씬 시뮬레이터 · 그림 8~9 생성기 |
