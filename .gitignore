@@ -7,3 +7,5 @@
 .DS_STORE
 color_coded_reconstruction.ply
 multi_freq_reconstruction.ply
+# 시뮬레이션 출력 (재생성 가능)
+dataset/debruijn/sim
