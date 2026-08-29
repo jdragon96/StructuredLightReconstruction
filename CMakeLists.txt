@@ -53,3 +53,12 @@ target_link_libraries(DeBruijnPatternTest PRIVATE
     ${OpenCV_LIBS}
 )
 target_include_directories(DeBruijnPatternTest PRIVATE ${OpenCV_INCLUDE_DIRS})
+
+add_executable(DeBruijnReconTest
+    example/DeBruijnReconTest.cpp
+)
+target_link_libraries(DeBruijnReconTest PRIVATE
+    StructuredLightCore
+    ${OpenCV_LIBS}
+)
+target_include_directories(DeBruijnReconTest PRIVATE ${OpenCV_INCLUDE_DIRS})

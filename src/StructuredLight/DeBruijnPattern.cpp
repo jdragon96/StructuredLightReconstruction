@@ -277,6 +277,73 @@ namespace sl
 
         for (const int s : code_)
             report_.symbolCounts[s] += 1;
+
+        buildRuns();
+    }
+
+    // 위상 없이 컬러 스트라이프만 쓸 때, 카메라는 인접 동일색이 병합된 run 만 본다.
+    // 따라서 디코딩 기준을 코드가 아니라 run 시퀀스로 다시 세워야 한다.
+    void DeBruijnPattern::buildRuns()
+    {
+        const int L = config_.length;
+        runs_.clear();
+        int i = 0;
+        while (i < L)
+        {
+            int j = i;
+            while (j + 1 < L && code_[static_cast<size_t>(j + 1)] == code_[static_cast<size_t>(i)])
+                ++j;
+            runs_.push_back(Run{code_[static_cast<size_t>(i)], j - i + 1, i});
+            i = j + 1;
+        }
+
+        // 유일해지는 최소 run 윈도우 길이를 찾는다. (symbol, width) 쌍을 함께 쓴다 —
+        // 색만으로는 유일해지지 않는 경우가 많다.
+        const int runCount = static_cast<int>(runs_.size());
+        runWindow_ = 0;
+        runWindowToStart_.clear();
+        for (int n = 2; n <= runCount; ++n)
+        {
+            std::map<RunKey, int> counts;
+            for (int start = 0; start + n <= runCount; ++start)
+            {
+                RunKey key;
+                key.reserve(static_cast<size_t>(n));
+                for (int t = 0; t < n; ++t)
+                    key.emplace_back(runs_[static_cast<size_t>(start + t)].symbol,
+                                     runs_[static_cast<size_t>(start + t)].width);
+                counts[key] += 1;
+            }
+            const bool unique = std::all_of(counts.begin(), counts.end(),
+                                            [](const auto &kv) { return kv.second == 1; });
+            if (unique)
+            {
+                runWindow_ = n;
+                for (int start = 0; start + n <= runCount; ++start)
+                {
+                    RunKey key;
+                    key.reserve(static_cast<size_t>(n));
+                    for (int t = 0; t < n; ++t)
+                        key.emplace_back(runs_[static_cast<size_t>(start + t)].symbol,
+                                         runs_[static_cast<size_t>(start + t)].width);
+                    runWindowToStart_.emplace(std::move(key), start);
+                }
+                break;
+            }
+        }
+    }
+
+    int DeBruijnPattern::lookupRuns(const RunKey &window) const
+    {
+        const auto it = runWindowToStart_.find(window);
+        return it == runWindowToStart_.end() ? -1 : it->second;
+    }
+
+    double DeBruijnPattern::boundaryU(int j) const
+    {
+        const int stripePx = resolvedStripePx();
+        const int x0 = (config_.imageWidth - stripePx * config_.length) / 2;
+        return static_cast<double>(x0 + j * stripePx) / static_cast<double>(config_.imageWidth);
     }
 
     int DeBruijnPattern::lookup(const std::vector<int> &window) const

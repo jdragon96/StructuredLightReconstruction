@@ -28,6 +28,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sl
@@ -102,6 +103,30 @@ namespace sl
         // 길이 n 윈도우 -> 시작 인덱스. 중복되는 윈도우는 등록하지 않는다.
         const std::map<std::vector<int>, int> &windowToStart() const { return windowToStart_; }
 
+        // ── run(같은 색 연속 구간) 단위 접근 ────────────────────────────────
+        // 위상 채널 없이 컬러 스트라이프만으로 복원할 때, 카메라가 실제로 관측하는
+        // 것은 코드가 아니라 run-length 압축된 수열이다(인접 동일색은 경계가 없다).
+        struct Run
+        {
+            int symbol = 0;      // 색 심볼
+            int width = 0;       // 스트라이프 단위 폭
+            int startStripe = 0; // 이 run 이 시작하는 절대 스트라이프 인덱스
+        };
+        using RunKey = std::vector<std::pair<int, int>>; // (symbol, width) 나열
+
+        const std::vector<Run> &runs() const { return runs_; }
+
+        // run 윈도우가 유일해지는 최소 길이. 0 이면 어떤 길이로도 유일하지 않다.
+        // 주의: 색만으로는 유일해지지 않는 경우가 많아 폭을 함께 쓴다.
+        int runWindow() const { return runWindow_; }
+
+        // runWindow() 길이의 (symbol, width) 윈도우 -> 시작 run 인덱스. 실패하면 -1.
+        int lookupRuns(const RunKey &window) const;
+
+        // 스트라이프 경계 j (0 <= j <= length) 의 정규화 프로젝터 x 좌표.
+        // renderImage() 의 배치(좌우 여백 포함)와 일치한다.
+        double boundaryU(int j) const;
+
         // 관측한 라벨 윈도우로 절대 스트라이프 인덱스를 찾는다. 실패하면 -1.
         // 주의: 완전 De Bruijn 수열은 코드워드 간 Hamming 거리가 1 이므로
         // 오분류 하나가 다른 유효 위치로 조용히 매핑될 수 있다. 반드시 이웃
@@ -142,7 +167,12 @@ namespace sl
         DeBruijnReport report_;
         std::map<std::vector<int>, int> windowToStart_;
 
+        std::vector<Run> runs_;
+        int runWindow_ = 0;
+        std::map<RunKey, int> runWindowToStart_;
+
         int resolvedStripePx() const;
+        void buildRuns();
     };
 
 } // namespace sl
