@@ -82,6 +82,14 @@ _COLOR_PALETTE = [
     (224, 224, 31),   # yellow
 ]
 
+# docs/DeBruijn 설계 팔레트. 심볼 0/1/2 = Green/Blue/Cyan.
+# R 채널을 쓰지 않는 것은 표면 반사·색수차·베이어 누화를 피하려는 선택이다.
+_GBC_PALETTE = [
+    (0,   255, 0),    # 0 Green
+    (0,   0,   255),  # 1 Blue
+    (0,   255, 255),  # 2 Cyan
+]
+
 _HAMMING_PALETTE = [
     (0,   0,   0),    # 000
     (255, 0,   0),    # 001  (R)
@@ -185,6 +193,25 @@ def _stripe_image(sequence: list, palette: list, W: int, H: int) -> np.ndarray:
     return np.tile(row[np.newaxis, :, :], (H, 1, 1))
 
 
+def _stripe_image_exact(sequence: list, palette: list, W: int, H: int) -> np.ndarray:
+    """스트라이프 폭을 정수로 고정하고 가운데 정렬한다. 여백은 검정.
+
+    src/StructuredLight/DeBruijnPattern.cpp 의 renderImage() 및
+    python/DeBruijnPattern.py 와 동일한 배치 — 복원 쪽 boundaryU() 가 이 배치를
+    전제하므로 시뮬레이터도 같아야 한다. _stripe_image() 의 full-bleed 방식은
+    스트라이프 폭이 픽셀마다 1 씩 흔들려 경계 위치가 어긋난다.
+    """
+    palette_arr = np.asarray(palette, dtype=np.uint8)
+    stripe_px = W // len(sequence)
+    x0 = (W - stripe_px * len(sequence)) // 2
+
+    row = np.zeros((W, 3), dtype=np.uint8)
+    for i, symbol in enumerate(sequence):
+        xa = x0 + i * stripe_px
+        row[xa:xa + stripe_px] = palette_arr[symbol]
+    return np.tile(row[np.newaxis, :, :], (H, 1, 1))
+
+
 def _self_equalizing_image(sequence: list, palette: list,
                            W: int, H: int) -> np.ndarray:
     """
@@ -221,6 +248,26 @@ def _color_code_data(props) -> dict:
             "self_equalizing": False,
         }
 
+    if mode == 'debruijn_open':
+        # 인접 동일색을 허용하는 표준 De Bruijn B(k,n). 주기 k^n 에서 offset 부터
+        # length 개를 잘라 쓴다 — docs/DeBruijn 의 제작 스펙과 같은 구성이다.
+        base = _de_bruijn_sequence(props.color_k, props.color_n)
+        length = props.color_length or len(base)
+        sequence = tuple(base[(props.color_offset + i) % len(base)] for i in range(length))
+        palette = (_GBC_PALETTE if props.color_palette_set == 'gbc'
+                   else _COLOR_PALETTE)[:props.color_k]
+        return {
+            "mode": mode,
+            "sequence": sequence,
+            "palette": palette,
+            "logical_stripes": len(base),
+            "projected_stripes": len(sequence),
+            "decode_window": props.color_n,
+            "offset": props.color_offset,
+            "adjacency": "unconstrained (De Bruijn B(k,n), 인접 동일 심볼 허용)",
+            "self_equalizing": False,
+        }
+
     sequence = _constrained_de_bruijn_sequence(props.color_k, props.color_n)
     self_equalizing = mode == 'self_equalizing'
     return {
@@ -241,6 +288,8 @@ def _color_coded(props, W: int, H: int) -> np.ndarray:
         return _self_equalizing_image(
             data["sequence"], data["palette"], W, H
         )
+    if data["mode"] == 'debruijn_open':
+        return _stripe_image_exact(data["sequence"], data["palette"], W, H)
     return _stripe_image(data["sequence"], data["palette"], W, H)
 
 
@@ -823,6 +872,12 @@ class DLPProperties(PropertyGroup):
                 "Constrained De Bruijn sequence: unique windows and no equal neighboring colors",
             ),
             (
+                'debruijn_open',
+                "De Bruijn (open)",
+                "Standard De Bruijn B(k,n): unique windows, equal neighbors allowed. "
+                "docs/DeBruijn 제작 스펙과 동일한 구성",
+            ),
+            (
                 'hamming',
                 "Hamming",
                 "RGB bit code with Hamming distance 1 between neighboring stripes",
@@ -841,6 +896,22 @@ class DLPProperties(PropertyGroup):
     color_n:      IntProperty(
         name="Window (n)", default=4, min=3, max=6,
         description="절대 stripe 위치를 식별하는 연속 색상 window 길이",
+    )
+    color_offset: IntProperty(
+        name="Offset", default=6, min=0, max=1024,
+        description="De Bruijn (open): 순환 수열에서 잘라낼 시작 위치",
+    )
+    color_length: IntProperty(
+        name="Stripes (L)", default=72, min=0, max=1024,
+        description="De Bruijn (open): 제작할 stripe 개수. 0이면 주기 전체",
+    )
+    color_palette_set: EnumProperty(
+        name="Palette", default='gbc',
+        items=[
+            ('gbc', "Green/Blue/Cyan", "docs/DeBruijn 설계 팔레트 — R 채널 미사용"),
+            ('default', "RGBCMY", "기존 6색 팔레트"),
+        ],
+        description="De Bruijn (open) 에서 사용할 팔레트",
     )
     color_precompensate: BoolProperty(
         name="Crosstalk Precompensation",
@@ -1298,6 +1369,7 @@ class DLP_OT_render_combined(Operator):
             "projected_stripes": color_data["projected_stripes"],
             "sequence":          color_data["sequence"],
             "palette":           [list(c) for c in color_data["palette"]],
+            "offset":            color_data.get("offset", 0),
             "adjacency":         color_data["adjacency"],
             "self_equalizing":   color_data["self_equalizing"],
             "pair_layout": (
@@ -1393,6 +1465,11 @@ class DLP_PT_main(Panel):
             if props.color_code_mode != 'hamming':
                 col.prop(props, "color_k")
             col.prop(props, "color_n")
+            if props.color_code_mode == 'debruijn_open':
+                col.prop(props, "color_palette_set", text="")
+                row = col.row(align=True)
+                row.prop(props, "color_offset")
+                row.prop(props, "color_length")
             data = _color_code_data(props)
             logical = data["logical_stripes"]
             projected = data["projected_stripes"]
