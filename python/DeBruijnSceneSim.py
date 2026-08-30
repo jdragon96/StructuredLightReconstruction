@@ -10,6 +10,10 @@
   python3 python/DeBruijnSceneSim.py --scene macbeth        # 컬러차트 24색
   python3 python/DeBruijnSceneSim.py --scene macbeth --no-white --noise 0.05
   python3 python/DeBruijnSceneSim.py --margin-map           # 복원 가능성 이론 지도
+  python3 python/DeBruijnSceneSim.py --scene dental --sss-um 400            # 구강 + 산란
+  python3 python/DeBruijnSceneSim.py --scene dental --palette vb            # 안 B: 450+405nm
+  python3 python/DeBruijnSceneSim.py --scene dental --polarization 0.8 \
+                                     --deep-fraction 0.7                    # 안 C: 편광
 
 핵심 결론(5절과 연결):
   white 레퍼런스가 있으면 알베도가 수식상 정확히 소거된다. 남는 문제는 편향이
@@ -37,8 +41,17 @@ plt.rcParams.update({
 })
 
 BG, FG, DIM = "#1a1a1a", "#e8e8e8", "#8a8a8a"
-PALETTE = np.array([[0, 1, 0], [0, 1, 1], [0, 0, 1]], float)   # Green, Cyan, Blue
-PAL_NAMES = ["Green", "Cyan", "Blue"]
+# 팔레트는 '채널 공간'으로 정의한다 — 인덱스 1 = 장파장 채널, 인덱스 2 = 단파장 채널.
+# 판정 수식은 어느 파장 조합이든 동일하고, 물리(산란)만 파장에 따라 달라진다.
+PALETTE = np.array([[0, 1, 0], [0, 1, 1], [0, 0, 1]], float)
+
+# 팔레트 이름 -> (장파장 nm, 단파장 nm)
+PALETTES = {
+    "gbc": ((550.0, 450.0), ["Green", "Cyan", "Blue"]),          # 현행 G/C/B
+    "vb":  ((450.0, 405.0), ["Blue", "Blue+Violet", "Violet"]),  # 단파장 2채널 (안 B)
+}
+PAL_NAMES = PALETTES["gbc"][1]
+REF_NM = 550.0  # --sss-um 이 가리키는 기준 파장
 
 # 구강 내 대표 표면. 반사율 근사값 (0~1).
 # 흥미롭게도 구강 표면 대부분은 G:B 가 균형에 가깝다 — 색도 붕괴보다
@@ -130,6 +143,17 @@ def stripe_truth(H, W, n_stripes, bump):
     return s
 
 
+def channel_sigma(palette_name, sss_um, um_per_px, exponent):
+    """채널별 산란 σ(픽셀). 확산 길이 ~ λ^exponent — 장파장일수록 깊이 침투해 더 퍼진다.
+
+    --sss-um 은 기준 파장 550nm 에서의 확산 길이다. 팔레트를 단파장으로 바꾸면
+    두 채널의 절대 σ 와 채널 간 차이가 함께 줄어든다.
+    """
+    (lam_long, lam_short), _ = PALETTES[palette_name]
+    lam = (650.0, lam_long, lam_short)  # R 채널은 패턴이 쓰지 않는다
+    return np.array([sss_um * (l / REF_NM) ** exponent / um_per_px for l in lam])
+
+
 def subsurface_blur(pattern, sigma_px):
     """표면하 산란 — 채널별 가우시안 확산.
 
@@ -153,11 +177,18 @@ def subsurface_blur(pattern, sigma_px):
 
 
 # ---------------------------------------------------------------- 촬영
-def capture(albedo, shading, projected, noise, ambient, crosstalk, rng, sigma_px=None):
+def capture(albedo, shading, projected, noise, ambient, crosstalk, rng, sigma_px=None,
+            deep_fraction=1.0, pol_efficiency=0.0):
     M = np.eye(3) * (1 - 2 * crosstalk) + crosstalk
     M = M / M.sum(1, keepdims=True)                       # 에너지 보존
     if sigma_px is not None and np.ndim(projected) == 3:
-        projected = subsurface_blur(projected, sigma_px)
+        # 돌아오는 빛 = 얕은(편광 유지, 선명) 성분 + 깊은(탈편광, 번짐) 성분.
+        # 편광 차 영상(co - cross)은 깊은 성분을 pol_efficiency 만큼 제거한다.
+        deep = deep_fraction * (1.0 - pol_efficiency)
+        mixed = (1.0 - deep_fraction) * projected + deep * subsurface_blur(projected, sigma_px)
+        # DC 레벨을 되돌려 '어두워진 것'과 '선명해진 것'을 분리한다.
+        # 실제 광량 손실은 노이즈 배수(sqrt2)로 따로 계산한다.
+        projected = mixed / max(1.0 - deep_fraction + deep, 1e-6)
     src = shading[..., None] * albedo * projected
     v = np.einsum("...i,ji->...j", src, M) + ambient   # matmul 의 허위 경고 회피
     v = v + rng.normal(0, noise, v.shape)
@@ -261,15 +292,17 @@ def evaluate(args):
 
     # 산란 σ 를 픽셀 단위로. um_per_px = 피치 / (스트라이프당 카메라 픽셀 수)
     um_per_px = args.pitch_um / (W / L)
-    if args.sss_um > 0:
-        g = args.sss_um / um_per_px
-        sigma = np.array([g * args.sss_gb_ratio, g, g / args.sss_gb_ratio])  # R, G, B
-    else:
-        sigma = None
+    sigma = (channel_sigma(args.palette, args.sss_um, um_per_px, args.sss_exponent)
+             if args.sss_um > 0 else None)
+
+    if args.polarization > 0:
+        args.noise *= np.sqrt(2.0)  # 편광 차 영상 = 두 장의 차 -> 노이즈 증가
 
     projected = PALETTE[code[idx_true]]
-    obs = capture(albedo, shading, projected, args.noise, args.ambient, args.crosstalk, rng, sigma)
-    white = capture(albedo, shading, np.ones(3), args.noise, args.ambient, args.crosstalk, rng, sigma)
+    obs = capture(albedo, shading, projected, args.noise, args.ambient, args.crosstalk, rng, sigma,
+                  args.deep_fraction, args.polarization)
+    white = capture(albedo, shading, np.ones(3), args.noise, args.ambient, args.crosstalk, rng, sigma,
+                  args.deep_fraction, args.polarization)
 
     # 스트라이프 중심 샘플
     c_obs = sample_stripe_centers(obs, s_true)
@@ -417,8 +450,16 @@ def main():
                     help="카메라 평면에서의 스트라이프 피치")
     ap.add_argument("--sss-um", type=float, default=0.0,
                     help="표면하 산란 확산 길이 (Green 기준, 0 이면 없음)")
-    ap.add_argument("--sss-gb-ratio", type=float, default=1.4,
-                    help="Green/Blue 확산 길이 비 — 장파장이 더 퍼진다")
+    ap.add_argument("--palette", choices=list(PALETTES), default="gbc",
+                    help="gbc = 현행 Green/Cyan/Blue, vb = 단파장 2채널 (450+405nm)")
+    ap.add_argument("--sss-exponent", type=float, default=1.5,
+                    help="확산 길이 ~ λ^exponent")
+    ap.add_argument("--deep-fraction", type=float, default=1.0,
+                    help="돌아오는 빛 중 깊은(탈편광·번지는) 성분의 비율. "
+                         "1.0 이면 얕은 성분이 없어 편광이 원리적으로 무력하다(최악 가정). "
+                         "에나멜 실측값이 이 설계의 최대 미지수다")
+    ap.add_argument("--polarization", type=float, default=0.0,
+                    help="편광 차 영상의 깊은 성분 제거율 0~1 (0 = 편광 없음)")
     ap.add_argument("--width", type=int, default=720)
     ap.add_argument("--height", type=int, default=240)
     ap.add_argument("--noise", type=float, default=0.03)
@@ -453,8 +494,15 @@ def main():
     R = evaluate(args)
     tag = f"{args.scene}_{'white' if args.white else 'nowhite'}"
 
-    sss = (f" · 산란 {args.sss_um:.0f}µm (피치 {args.pitch_um:.0f}µm 의 "
-           f"{args.sss_um / args.pitch_um:.2f}배)" if args.sss_um > 0 else " · 산란 없음")
+    if args.sss_um > 0:
+        sg = channel_sigma(args.palette, args.sss_um, args.pitch_um / (args.width / 72), args.sss_exponent)
+        sss = (f" · 산란 {args.sss_um:.0f}µm@550nm -> σ {sg[1]:.1f}/{sg[2]:.1f}px"
+               f" (비 {sg[1] / max(sg[2], 1e-9):.2f})")
+        if args.polarization > 0:
+            sss += f" · 편광 제거 {100 * args.polarization:.0f}%"
+    else:
+        sss = " · 산란 없음"
+    print(f"팔레트 {args.palette} {PALETTES[args.palette][1]}")
     print(f"씬 '{args.scene}' · white {'사용' if args.white else '미사용'} · "
           f"노이즈 σ={args.noise}{sss} · {args.height}x{args.width} · 72 스트라이프/행\n")
     print(f"   {'방법':<13}{'라벨':>8}{'LUT히트':>9}{'위치정확':>9}{'조용한오복원':>13}"
