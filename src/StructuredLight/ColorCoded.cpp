@@ -380,8 +380,10 @@ namespace sl
             static_cast<int16_t>(std::min_element(cost.begin(), cost.end()) - cost.begin());
         for (int x = length - 1; x > 0; --x)
         {
-            orders[static_cast<size_t>(x - 1)] =
-                backtrack[static_cast<size_t>(x)][static_cast<size_t>(orders[static_cast<size_t>(x)])];
+            int ix = static_cast<size_t>(x);
+            size_t order = orders[ix];
+            size_t target = static_cast<size_t>(x - 1);
+            orders[target] = backtrack[ix][order];
         }
         return orders;
     }
@@ -470,7 +472,9 @@ namespace sl
     ColorCodedReconstruction::ProjectorCoordinate ColorCodedReconstruction::computeProjectorCoordinate(
         const ColorCodedFrames &frames) const
     {
+        // 컬러 패턴에서, 각 채널 별 세기를 계산한다.
         const ImageVec3 colorRatio = computeColorRatio(frames.color, frames.white);
+        // ㅇㅇㅇ
         const PhaseData phase = computePhase(frames.phase);
         const Eigen::ArrayXXi labels = classifyColorCode(colorRatio);
         const FringeOrderResult fringe = decodeFringeOrder(phase.wrapped, phase.valid, labels, colorRatio);

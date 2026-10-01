@@ -58,8 +58,8 @@ R/G/B 각각 0~255 범위의 `Image`) 이미지를 사용한다.
 
 ### 2.1 컬러 스트라이프 코드 — `dataset/color/render_00.png`, `render_white.png`
 
-| 컬러 스트라이프 코드 (`color`) | all-white 레퍼런스 (`white`) |
-| --- | --- |
+| 컬러 스트라이프 코드 (`color`)                  | all-white 레퍼런스 (`white`)                  |
+| ----------------------------------------------- | --------------------------------------------- |
 | ![color_stripe](image/color_stripe_capture.png) | ![color_white](image/color_white_capture.png) |
 
 - `color`는 `color_pattern_info.json`의 `palette`(8색: 흑/적/녹/황/청/자/시안/백)와
@@ -74,6 +74,7 @@ R/G/B 각각 0~255 범위의 `Image`) 이미지를 사용한다.
 
 - R/G/B 채널이 각각 `phase_shifts_radians = {0, -120°, -240°}` 만큼 어긋난
   사인파 패턴(`frequency=64`)을 동시에 투사한 한 장의 캡처본이다.
+
 - `computePhase()`가 아래 식으로 채널별 픽셀값에서 바로 wrapped phase /
   modulation을 계산한다(3-step PSP를 한 장의 컬러 이미지로 압축한 형태):
 
@@ -81,6 +82,40 @@ R/G/B 각각 0~255 범위의 `Image`) 이미지를 사용한다.
   wrapped     = atan2(√3·(G-B), 2R-G-B)      ∈ [0, 2π)
   modulation  = sqrt((2R-G-B)² + 3·(G-B)²) / 3
   ```
+
+![Phase Map](image/rgb_phase_map.png)
+
+```
+R = I0 + A cos(φ)
+G = I0 + A cos(φ - 2π/3)
+B = I0 + A cos(φ - 4π/3)
+
+I0 = 평균 밝기, ambient 포함
+A  = fringe contrast, 즉 modulation amplitude
+φ  = 우리가 알고 싶은 phase
+```
+
+x축 성분은 다음과 같다:
+
+$$
+x = R \cos{0°} + G \cos{120°} + B \cos{240°}  = R - \frac{1}{2}G - \frac{1}{2}B = \frac{2R-G-B}{2}
+$$
+
+y축 성분은 다음과 같다:
+
+$$
+y = R \sin{0°} + G \sin{120°} + B \sin{240°}  = 0 + \frac{\sqrt{3}}{2}G - \frac{\sqrt{3}}{2}B = \frac{\sqrt{3}}{2}(G-B)
+$$
+
+hue는 다음과 같다:
+
+$$
+hue = atan2(\frac{\sqrt{3}}{2}(G-B), \frac{2R-G-B}{2})
+$$
+
+- $2R-G-B$ 는 Red가 Green,Blue의 평균보다 얼마나 강한가를 의미
+- $G-B$ = Green과 Blue가 Red축 기준으로 대칭이라, 둘의 차이만 세로축 성분에 남음
+- $\sqrt{3} = \sin(120\degree) = \frac{\sqrt{3}}{2}$ 에서 나온 값의 $120\degree$ 배치의 흔적
 
 ---
 
@@ -96,8 +131,8 @@ R/G/B 각각 0~255 범위의 `Image`) 이미지를 사용한다.
 colorRatio.ch = clamp(color.ch / max(white.ch, 1), 0, 1.25)
 ```
 
-| R | G | B |
-| --- | --- | --- |
+| R                                   | G                                   | B                                   |
+| ----------------------------------- | ----------------------------------- | ----------------------------------- |
 | ![ratio_r](image/color_ratio_r.png) | ![ratio_g](image/color_ratio_g.png) | ![ratio_b](image/color_ratio_b.png) |
 
 - 조명 불균일(white 레퍼런스로 정규화)을 보정한 채널별 반사율 비율.
@@ -121,8 +156,8 @@ label = bitR + 2·bitG + 4·bitB   ∈ [0, 7]
 
 ### 3.3 Wrapped Phase / Modulation / Phase Valid
 
-| wrapped phase | modulation | phase valid |
-| --- | --- | --- |
+| wrapped phase                       | modulation                          | phase valid                           |
+| ----------------------------------- | ----------------------------------- | ------------------------------------- |
 | ![wrapped](image/wrapped_phase.png) | ![modulation](image/modulation.png) | ![phase_valid](image/phase_valid.png) |
 
 - `wrapped_phase.png`: 0~255가 위상 0~2π에 선형 대응. `frequency=64`이므로
@@ -135,8 +170,8 @@ label = bitR + 2·bitG + 4·bitB   ∈ [0, 7]
 
 ### 3.4 Fringe Order 디코딩 — `fringe_orders.png`, `fringe_valid.png`
 
-| fringe orders | fringe valid |
-| --- | --- |
+| fringe orders                             | fringe valid                            |
+| ----------------------------------------- | --------------------------------------- |
 | ![fringe_orders](image/fringe_orders.png) | ![fringe_valid](image/fringe_valid.png) |
 
 - `decodeFringeOrder`가 각 row의 유효 phase 구간마다 Viterbi-style DP
@@ -161,8 +196,8 @@ uProjector  = (fringeOrder + fraction) / frequency   ∈ [0, 1)
 valid       = fringeValid && (0 <= uProjector < 1)
 ```
 
-| uProjector | valid |
-| --- | --- |
+| uProjector                          | valid                     |
+| ----------------------------------- | ------------------------- |
 | ![uprojector](image/uprojector.png) | ![valid](image/valid.png) |
 
 - `uprojector.png`는 `fringe_orders.png`의 64단 계단과 `wrapped_phase.png`의
@@ -176,8 +211,8 @@ valid       = fringeValid && (0 <= uProjector < 1)
 교차점을 계산한다(교차각 `minTriangulationAngleDeg`, 거리 `t > 0`,
 선택적으로 `maxCameraDistance` 검증).
 
-| depth (world Z) | triangulation valid |
-| --- | --- |
+| depth (world Z)           | triangulation valid                         |
+| ------------------------- | ------------------------------------------- |
 | ![depth](image/depth.png) | ![tri_valid](image/triangulation_valid.png) |
 
 - `depth.png`는 유효 픽셀의 world Z 좌표를 정규화하여 표시한다(무효 픽셀은 0).
@@ -188,22 +223,22 @@ valid       = fringeValid && (0 <= uProjector < 1)
 
 ## 4. 설정 (`ColorCodedConfig`)
 
-| 필드 | 기본값 | 설명 |
-| --- | --- | --- |
-| `phaseModulationThreshold` | 8.0 | `computePhase`의 modulation 최소값. 미달 시 위상 무효 |
-| `hammingOnThreshold` | 0.80 | hamming 모드에서 채널 on/off 판정 임계값 (colorRatio 기준) |
-| `minSegmentPixels` | 8 | fringe order 디코딩 대상이 되는 최소 연속 유효-phase 구간 길이 |
-| `minRunPixels` | 3 | 앵커 윈도우 판정 시 run-length 최소 길이 |
-| `minAnchorWindows` | 1 | 구간 디코딩에 필요한 최소 앵커(고유 윈도우 매칭) 수 |
-| `medianLabelKsize` | 5 | 컬러 라벨 시퀀스의 1D median 필터 커널 |
-| `localOrderJump` | 4 | DP에서 허용하는 fringe-order 점프 범위 |
-| `expectedProjectorStepPx` | 1.0 | 픽셀당 기대 프로젝터 이동량 (smoothness 기준) |
-| `smoothnessWeight` | 0.12 | smoothness 페널티 가중치 |
-| `smoothnessTruncationPx` | 5.0 | smoothness 페널티 최대치(이 값 이상은 더 늘지 않음) |
-| `discontinuityPenalty` | 7.0 | `localOrderJump`을 벗어난 전이에 부과되는 페널티 |
-| `bidirectionalConsensus` | true | 정/역방향 DP 결과가 일치하는 픽셀만 유효로 채택 |
-| `minTriangulationAngleDeg` | 0.25 | 레이-평면 최소 교차각 |
-| `maxCameraDistance` | (없음) | 카메라로부터 최대 거리 (옵션) |
+| 필드                       | 기본값 | 설명                                                           |
+| -------------------------- | ------ | -------------------------------------------------------------- |
+| `phaseModulationThreshold` | 8.0    | `computePhase`의 modulation 최소값. 미달 시 위상 무효          |
+| `hammingOnThreshold`       | 0.80   | hamming 모드에서 채널 on/off 판정 임계값 (colorRatio 기준)     |
+| `minSegmentPixels`         | 8      | fringe order 디코딩 대상이 되는 최소 연속 유효-phase 구간 길이 |
+| `minRunPixels`             | 3      | 앵커 윈도우 판정 시 run-length 최소 길이                       |
+| `minAnchorWindows`         | 1      | 구간 디코딩에 필요한 최소 앵커(고유 윈도우 매칭) 수            |
+| `medianLabelKsize`         | 5      | 컬러 라벨 시퀀스의 1D median 필터 커널                         |
+| `localOrderJump`           | 4      | DP에서 허용하는 fringe-order 점프 범위                         |
+| `expectedProjectorStepPx`  | 1.0    | 픽셀당 기대 프로젝터 이동량 (smoothness 기준)                  |
+| `smoothnessWeight`         | 0.12   | smoothness 페널티 가중치                                       |
+| `smoothnessTruncationPx`   | 5.0    | smoothness 페널티 최대치(이 값 이상은 더 늘지 않음)            |
+| `discontinuityPenalty`     | 7.0    | `localOrderJump`을 벗어난 전이에 부과되는 페널티               |
+| `bidirectionalConsensus`   | true   | 정/역방향 DP 결과가 일치하는 픽셀만 유효로 채택                |
+| `minTriangulationAngleDeg` | 0.25   | 레이-평면 최소 교차각                                          |
+| `maxCameraDistance`        | (없음) | 카메라로부터 최대 거리 (옵션)                                  |
 
 ---
 
@@ -244,13 +279,25 @@ reconstructor.ExportDebugFile("color_coded_debug");
 
 ## 6. Multi-Frequency Phase Shift와의 비교
 
-| | Multi-Frequency Phase Shift | Color-Coded |
-| --- | --- | --- |
-| coarse 정보 | Gray code (`2^nGrayBits`개 패턴) | 컬러 스트라이프 (1개 패턴) |
-| fine 정보 | 다중 주파수 4-step phase (`frequencies.size() * 4`개 패턴) | RGB 3-step phase (1개 패턴) |
-| fringe order 결정 | Gray code 인덱스로 결정적(deterministic) | 행 단위 Viterbi DP로 컬러 코드 + smoothness 기반 추정 |
-| 필요 패턴 수 | 많음 (정밀, 강건) | 적음 (빠른 캡처, 동적 장면에 유리) |
-| 참고 문서 | [`docs/MultiFrequencyPhaseShift/README.md`](../MultiFrequencyPhaseShift/README.md) | (이 문서) |
+|                   | Multi-Frequency Phase Shift                                                        | Color-Coded                                           |
+| ----------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| coarse 정보       | Gray code (`2^nGrayBits`개 패턴)                                                   | 컬러 스트라이프 (1개 패턴)                            |
+| fine 정보         | 다중 주파수 4-step phase (`frequencies.size() * 4`개 패턴)                         | RGB 3-step phase (1개 패턴)                           |
+| fringe order 결정 | Gray code 인덱스로 결정적(deterministic)                                           | 행 단위 Viterbi DP로 컬러 코드 + smoothness 기반 추정 |
+| 필요 패턴 수      | 많음 (정밀, 강건)                                                                  | 적음 (빠른 캡처, 동적 장면에 유리)                    |
+| 참고 문서         | [`docs/MultiFrequencyPhaseShift/README.md`](../MultiFrequencyPhaseShift/README.md) | (이 문서)                                             |
 
 두 방식 모두 최종적으로 `uProjector ∈ [0,1)` + `valid` 마스크를 만들어 동일한
 "카메라 레이 ∩ 프로젝터 평면" 삼각측량 로직으로 3D 점을 얻는다는 점은 동일하다.
+
+---
+
+## 7. Color Coded
+
+- ㅇㅇㅇ
+
+---
+
+## 8. 생각해볼만한 것
+
+### 8.1. 빨강색 객체를 탐지할 때 어떻게 해야하나?

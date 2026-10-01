@@ -325,42 +325,79 @@ $$
 
 #### Step 2 — 프로젝터 수직 평면
 
-$u_{proj}$ → 프로젝터 픽셀 x → 기울기 $a$:
+![projector_plane](image/projector_plane.png)
+
+`uProj`는 **x 좌표 하나뿐**이다. y는 알 수 없으므로, 한 카메라 픽셀이 대응되는 것은
+프로젝터의 한 *점*이 아니라 한 **열(column)** 전체다. 그 열의 모든 픽셀에서 나가는
+광선은 프로젝터 광학중심 $\mathbf{C}_{proj}$ 를 꼭짓점으로 부채꼴처럼 펴지며, 이
+광선 다발이 곧 하나의 **평면**을 이룬다(위 그림 패널 A). 카메라는 레이 하나, 프로젝터는
+평면 하나 — 그래서 Step 3이 "레이 ∩ 평면" 교차가 된다.
+
+**(1) $u_{proj}$ → 프로젝터 픽셀 열 → 기울기 $a$**
 
 $$
-a = \frac{u_{proj} \cdot W_p - c_{xp}}{f_{xp}}
+x_p = u_{proj} \cdot W_p,
+\qquad
+a = \frac{x_p - c_{xp}}{f_{xp}} = \frac{u_{proj} \cdot W_p - c_{xp}}{f_{xp}}
 $$
 
-프로젝터 좌표계에서 이 열(column)을 통과하는 수직 평면의 법선:
+$a$ 는 단위가 없는 **기울기**다. 프로젝터 좌표계에서 이 열에 맺히는 점들이 만족하는
+$X/Z$ 값이며, 정규화 이미지 평면($Z = 1$)에서의 $X$ 좌표라고 봐도 같다.
+
+**(2) 기울기 $a$ → 법선 $(-1, 0, a)$**
+
+프로젝터 핀홀 모델에서 점 $(X, Y, Z)$ 가 열 $x_p$ 에 투영될 조건은
 
 $$
-\mathbf{n}_{proj} = \begin{bmatrix} -1,\ 0,\ a \end{bmatrix}
+x_p = f_{xp} \cdot \frac{X}{Z} + c_{xp}
+\iff
+\frac{X}{Z} = a
+\iff
+X - aZ = 0
 $$
 
-유도: 프로젝터 핀홀 모델에서 x 열에 투영되는 점은 $X/Z = a$ 를 만족
+여기서 핵심은 **$Y$ 가 조건식에 아예 등장하지 않는다**는 점이다. $Y$ 는 아무 값이나
+가능하므로 이 조건은 (top view에서 본) 직선 하나가 아니라, 그 직선이 $Y$ 축 방향으로
+그대로 쓸려나간 **평면**을 정의한다. 이것이 "**수직(vertical)** 평면"이라 부르는
+이유이자, 법선의 $Y$ 성분이 0인 이유다(패널 B).
 
-$\Rightarrow X - aZ = 0 \Rightarrow \mathbf{n} = (-1,,0,,a)$
+$$
+X - aZ = 0
+\iff
+(X,\ Y,\ Z) \cdot (-1,\ 0,\ a) = 0
+\quad\Longrightarrow\quad
+\mathbf{n}_{proj} = \begin{bmatrix} -1 & 0 & a \end{bmatrix}^{\top}
+$$
 
-World 좌표계로 회전:
+- 부호가 반대인 $(1, 0, -a)$ 도 **같은 평면**이다 — 평면 방정식은 법선의 스칼라배에
+  대해 불변이므로 어느 쪽을 써도 무방하다.
+- 식에 **상수항이 없다** = 이 평면은 원점을 지난다. 프로젝터 좌표계의 원점이 곧
+  $\mathbf{C}_{proj}$ 이므로, Step 3에서 평면이 $\mathbf{C}_{proj}$ 를 지난다고 쓸 수 있다.
+
+**(3) 프로젝터 좌표계 → world 좌표계**
+
+법선은 위치가 아니라 **방향** 벡터이므로 평행이동 없이 회전만 적용한다:
 
 $$
 \mathbf{n}_{world}
 =
-\mathbf{R}_{p \to w}
-\cdot
-\mathbf{n}_{proj}
+\mathbf{R}_{p \to w}\, \mathbf{n}_{proj}
 =
 \mathbf{R}_{p \to w}
-\begin{bmatrix}
--1 \\
-0 \\
-a
-\end{bmatrix}
+\begin{bmatrix} -1 \\ 0 \\ a \end{bmatrix}
+=
+-\,\mathbf{R}_{p \to w}[:,0] \;+\; a\,\mathbf{R}_{p \to w}[:,2]
 $$
 
-코드에서:
+코드에서 (`CpuPlaneTriangulator::triangulate`):
 
-normalWorld = -Rp2w.col(0) + a \* Rp2w.col(2)
+```cpp
+const Image a = (corr.uProj * Wp - cxp) / fxp;          // (1)
+normalWorld = -Rp2w.col(0) + a * Rp2w.col(2);           // (2)+(3)
+```
+
+> 평면의 **위치** 정보는 법선이 아니라 Step 3의 $\mathbf{C}_{proj}$ 가 담당한다.
+> 법선은 방향(기울기)만, 중심은 위치만 — 둘이 합쳐져야 평면 하나가 확정된다.
 
 ---
 
